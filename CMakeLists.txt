@@ -24,9 +24,18 @@ find_package(catkin REQUIRED
 
 find_package(Boost REQUIRED)
 
+# add_message_files(
+#   FILES
+# )
+
 # dynamic reconfigure
 generate_dynamic_reconfigure_options(
     cfg/AMCL.cfg
+)
+
+generate_messages(
+  DEPENDENCIES
+  bingo_msg
 )
 
 catkin_package(

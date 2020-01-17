@@ -76,6 +76,9 @@
 // For monitoring the estimator
 #include <diagnostic_updater/diagnostic_updater.h>
 
+// custom message 
+#include <bingo_msg/DockInfraRed.h>
+
 #define NEW_UNIFORM_SAMPLING 1
 
 using namespace amcl;
@@ -171,10 +174,12 @@ class AmclNode
     void initialPoseReceived(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
     void handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStamped& msg);
     void mapReceived(const nav_msgs::OccupancyGridConstPtr& msg);
+    void infraredReceived(const bingo_msg::DockInfraRed& msg);
 
     void handleMapMessage(const nav_msgs::OccupancyGrid& msg);
     void freeMapDependentMemory();
     map_t* convertMap( const nav_msgs::OccupancyGrid& map_msg );
+    map_t* convertMapForCharging( const nav_msgs::OccupancyGrid& map_msg );
     void updatePoseFromServer();
     void applyInitialPose();
 
@@ -252,6 +257,7 @@ class AmclNode
     ros::ServiceServer set_map_srv_;
     ros::Subscriber initial_pose_sub_old_;
     ros::Subscriber map_sub_;
+    ros::Subscriber dockir_sub_;
 
     diagnostic_updater::Updater diagnosic_updater_;
     void standardDeviationDiagnostics(diagnostic_updater::DiagnosticStatusWrapper& diagnostic_status);
@@ -287,6 +293,9 @@ class AmclNode
     ros::Time last_laser_received_ts_;
     ros::Duration laser_check_interval_;
     void checkLaserReceived(const ros::TimerEvent& event);
+
+    // check if robot is more than 1m close to origin (recharging pile)
+    bool near_infrared;
 };
 
 std::vector<std::pair<int,int> > AmclNode::free_space_indices;
@@ -436,6 +445,8 @@ AmclNode::AmclNode() :
   private_nh_.param("std_warn_level_x", std_warn_level_x_, 0.2);
   private_nh_.param("std_warn_level_y", std_warn_level_y_, 0.2);
   private_nh_.param("std_warn_level_yaw", std_warn_level_yaw_, 0.1);
+
+  dockir_sub_ = nh_.subscribe("dock_ir", 1, &AmclNode::infraredReceived, this);
 
   transform_tolerance_.fromSec(tmp_tol);
 
@@ -843,6 +854,13 @@ AmclNode::mapReceived(const nav_msgs::OccupancyGridConstPtr& msg)
 }
 
 void
+AmclNode::infraredReceived(const bingo_msg::DockInfraRed& msg)
+{
+  if ( msg.mid_l > 0 || msg.mid_r > 0) near_infrared = true;
+  else near_infrared = false;
+}
+
+void
 AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
 {
   boost::recursive_mutex::scoped_lock cfl(configuration_mutex_);
@@ -864,7 +882,11 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   lasers_update_.clear();
   frame_to_laser_.clear();
 
-  map_ = convertMap(msg);
+  if (near_infrared) {
+    map_ = convertMapForCharging(msg);
+  } else {
+    map_ = convertMap(msg);
+  }
 
 #if NEW_UNIFORM_SAMPLING
   // Index of free space
@@ -956,7 +978,36 @@ AmclNode::convertMap( const nav_msgs::OccupancyGrid& map_msg )
 {
   map_t* map = map_alloc();
   ROS_ASSERT(map);
+  map->size_x = map_msg.info.width;
+  map->size_y = map_msg.info.height;
+  map->scale = map_msg.info.resolution;
+  map->origin_x = map_msg.info.origin.position.x + (map->size_x / 2) * map->scale;
+  map->origin_y = map_msg.info.origin.position.y + (map->size_y / 2) * map->scale;
+  // Convert to player format
+  map->cells = (map_cell_t*)malloc(sizeof(map_cell_t)*map->size_x*map->size_y);
+  ROS_ASSERT(map->cells);
+  for(int i=0;i<map->size_x * map->size_y;i++)
+  {
+    if(map_msg.data[i] == 0)
+      map->cells[i].occ_state = -1;
+    else if(map_msg.data[i] == 100)
+      map->cells[i].occ_state = +1;
+    else
+      map->cells[i].occ_state = 0;
+  }
 
+  return map;
+}
+
+map_t*
+AmclNode::convertMapForCharging( const nav_msgs::OccupancyGrid& map_msg )
+{
+  map_t* map = map_alloc();
+  ROS_ASSERT(map);
+  // TODO
+  printf("map width %d\n", map_msg.info.width);
+  printf("map height %d\n", map_msg.info.height);
+  printf("map origin x:%f, y:%f\n", map_msg.info.origin.position.x, map_msg.info.origin.position.y);
   map->size_x = map_msg.info.width;
   map->size_y = map_msg.info.height;
   map->scale = map_msg.info.resolution;
