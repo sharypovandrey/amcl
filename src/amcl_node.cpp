@@ -1008,8 +1008,12 @@ AmclNode::convertMapForCharging( const nav_msgs::OccupancyGrid& map_msg )
   printf("map width %d\n", map_msg.info.width);
   printf("map height %d\n", map_msg.info.height);
   printf("map origin x:%f, y:%f\n", map_msg.info.origin.position.x, map_msg.info.origin.position.y);
-  map->size_x = map_msg.info.width;
-  map->size_y = map_msg.info.height;
+  int original_map_width = map_msg.info.width;
+  int original_map_height = map_msg.info.height;
+  // let's set map width and height to 3m, to decrease search area
+  int size_ = static_cast<int>(3 / map_msg.info.resolution);
+  map->size_x = size_;
+  map->size_y = size_;
   map->scale = map_msg.info.resolution;
   map->origin_x = map_msg.info.origin.position.x + (map->size_x / 2) * map->scale;
   map->origin_y = map_msg.info.origin.position.y + (map->size_y / 2) * map->scale;
@@ -1018,12 +1022,20 @@ AmclNode::convertMapForCharging( const nav_msgs::OccupancyGrid& map_msg )
   ROS_ASSERT(map->cells);
   for(int i=0;i<map->size_x * map->size_y;i++)
   {
-    if(map_msg.data[i] == 0)
-      map->cells[i].occ_state = -1;
-    else if(map_msg.data[i] == 100)
-      map->cells[i].occ_state = +1;
-    else
-      map->cells[i].occ_state = 0;
+    if ( 
+      i % map->size_x >= map->origin_x - size_ / 2 &&
+      i % map->size_x < map->origin_x - size_ / 2 + size_ &&
+      i / map->size_x >= map->origin_y - size_ / 2 &&
+      i / map->size_x < map->origin_y - size_ / 2 + size_
+    ) 
+    {
+      if(map_msg.data[i] == 0)
+        map->cells[i].occ_state = -1;
+      else if(map_msg.data[i] == 100)
+        map->cells[i].occ_state = +1;
+      else
+        map->cells[i].occ_state = 0;
+    }
   }
 
   return map;
