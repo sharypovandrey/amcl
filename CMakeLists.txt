@@ -20,6 +20,7 @@ find_package(catkin REQUIRED
     tf2_geometry_msgs
     tf2_msgs
     tf2_ros
+    bingo_msg
 )
 
 find_package(Boost REQUIRED)
